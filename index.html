@@ -229,6 +229,15 @@
   </section>
 
   <section>
+    <h2><span class="num">3d</span>Debug — format brut de personal_sign</h2>
+    <p>Avant de retenter Pimlico : on signe un hash de test avec ta passkey via <code>personal_sign</code> et on regarde EXACTEMENT ce que Coinbase renvoie (longueur en octets, et si ça se décode comme un <code>WebAuthnAuth</code> ABI-encodé). Ça ne construit ni n'envoie aucune transaction — signature seule, sur un hash bidon qui ne peut rien débloquer.</p>
+    <div class="row">
+      <button id="debugSignBtn" disabled>Signer un hash de test</button>
+    </div>
+    <div id="debugSignStatus" class="status" style="display:none"></div>
+  </section>
+
+  <section>
     <h2><span class="num">4</span>Solution avancée — Pimlico (si l'étape 3 échoue)</h2>
     <div class="warn">
       <strong>Zone expérimentale.</strong> Ce flow tente de récupérer une signature générique de ta passkey via la popup Coinbase (personal_sign), puis de construire et soumettre une UserOperation nous-mêmes via Pimlico. C'est un chemin non garanti — si le format de signature renvoyé par Coinbase ne correspond pas exactement à ce qu'attend le contrat, la transaction sera simplement rejetée par le bundler (rien perdu, juste un échec visible). Ne mets pas de côté cette possibilité : ça peut demander plusieurs itérations.
@@ -348,6 +357,43 @@ document.getElementById('diagBtn').addEventListener('click', async () => {
         : 'Un des deux manque. Le flow Pimlico ci-dessous n\'aboutira probablement pas sans qu\'un dev déploie d\'abord la brique manquante (n\'importe qui peut le faire via CREATE2, ça reste possible, mais c\'est une étape en plus).'),
       factoryDeployed && epDeployed ? 'ok' : 'err'
     );
+  } catch (e) {
+    setStatus(el, 'Erreur : ' + (e.message || e), 'err');
+  }
+});
+
+document.getElementById('debugSignBtn').addEventListener('click', async () => {
+  const el = document.getElementById('debugSignStatus');
+  if (!ethersReady) { setStatus(el, 'ethers.js pas encore chargé, réessaie dans quelques secondes.', 'err'); return; }
+  try {
+    // Fixed, harmless test hash (keccak256("hyperevm-recovery-debug-test")) — cannot unlock anything.
+    const testHash = ethers.keccak256(ethers.toUtf8Bytes('hyperevm-recovery-debug-test'));
+    setStatus(el, 'Demande de signature en cours (approuve via ta passkey dans la popup)…', 'ok');
+    const rawSig = await provider.request({ method: 'personal_sign', params: [testHash, userAddress] });
+
+    const byteLen = (rawSig.length - 2) / 2;
+    let report = 'Hash signé : ' + testHash + '\nSignature brute renvoyée (' + byteLen + ' octets) :\n' + rawSig + '\n\n';
+
+    if (byteLen === 65) {
+      report += 'Format : 65 octets — ressemble à une signature ECDSA classique (r,s,v). ' +
+        'Ce N\'EST PAS un WebAuthnAuth ABI-encodé, donc ce format ne validera pas directement dans validateUserOp pour un owner passkey. ' +
+        'Coinbase a probablement re-signé/transformé le hash côté app plutôt que de renvoyer l\'assertion WebAuthn brute.';
+    } else {
+      // Try to decode as WebAuthnAuth tuple: (bytes,string,uint256,uint256,uint256,uint256)
+      try {
+        const decoded = new ethers.AbiCoder().decode(
+          ['bytes', 'string', 'uint256', 'uint256', 'uint256', 'uint256'],
+          rawSig
+        );
+        report += 'Ça DÉCODE comme un tuple (bytes authenticatorData, string clientDataJSON, uint256 challengeIndex, uint256 typeIndex, uint256 r, uint256 s).\n' +
+          'clientDataJSON : ' + decoded[1] + '\n\n' +
+          'C\'est le bon type de structure. Reste à vérifier si le champ "challenge" dans ce clientDataJSON correspond bien à base64url(testHash) — si oui, on peut réutiliser ce chemin pour signer un vrai userOpHash.';
+      } catch (decodeErr) {
+        report += 'Ne décode PAS comme un WebAuthnAuth standard (' + (decodeErr.message || decodeErr) + ').\n' +
+          'Format non reconnu — à inspecter manuellement (copie la signature brute ci-dessus).';
+      }
+    }
+    setStatus(el, report, 'ok');
   } catch (e) {
     setStatus(el, 'Erreur : ' + (e.message || e), 'err');
   }
@@ -561,6 +607,7 @@ document.getElementById('connectBtn').addEventListener('click', async () => {
     document.getElementById('diagBtn').disabled = false;
     document.getElementById('pimBtn').disabled = false;
     document.getElementById('verifyAddrBtn').disabled = false;
+    document.getElementById('debugSignBtn').disabled = false;
   } catch (e) {
     setStatus(statusEl, 'Erreur de connexion : ' + (e.message || e), 'err');
   }
