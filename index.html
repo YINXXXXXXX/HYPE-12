@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Récupération HyperEVM — Smart Wallet</title>
+<style>
+  :root {
+    --ink: #0b1210;
+    --paper: #f6f3ec;
+    --line: #d8d2c2;
+    --accent: #1f6f5c;
+    --accent-dark: #143f34;
+    --danger: #8c2f2f;
+    --danger-bg: #f6e8e6;
+    --mono: 'IBM Plex Mono', 'SF Mono', Menlo, monospace;
+    --serif: 'Iowan Old Style', 'Georgia', serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--serif);
+    line-height: 1.5;
+    padding: 0 0 80px;
+  }
+  header {
+    border-bottom: 1px solid var(--line);
+    padding: 28px 24px 20px;
+    max-width: 640px;
+    margin: 0 auto;
+  }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 8px;
+  }
+  h1 {
+    font-size: 26px;
+    margin: 0 0 6px;
+    font-weight: 600;
+  }
+  .sub {
+    color: #52544c;
+    font-size: 15px;
+    margin: 0;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 24px;
+  }
+  section {
+    border: 1px solid var(--line);
+    background: #fff;
+    padding: 22px;
+    margin-bottom: 20px;
+  }
+  section h2 {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--accent-dark);
+    margin: 0 0 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  section h2 .num {
+    background: var(--accent-dark);
+    color: #fff;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+  }
+  p { font-size: 15px; }
+  button {
+    font-family: var(--mono);
+    font-size: 13px;
+    background: var(--accent-dark);
+    color: #fff;
+    border: none;
+    padding: 12px 18px;
+    cursor: pointer;
+    letter-spacing: 0.02em;
+  }
+  button:hover { background: var(--accent); }
+  button:disabled { background: #b6b2a4; cursor: not-allowed; }
+  button.danger { background: var(--danger); }
+  button.danger:hover { background: #6e2222; }
+  input, select {
+    font-family: var(--mono);
+    font-size: 14px;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    background: var(--paper);
+    width: 100%;
+    margin-top: 6px;
+  }
+  label {
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #52544c;
+    display: block;
+    margin-top: 14px;
+  }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-top: 14px; }
+  .status {
+    font-family: var(--mono);
+    font-size: 13px;
+    padding: 12px 14px;
+    border-left: 3px solid var(--line);
+    margin-top: 14px;
+    white-space: pre-wrap;
+    word-break: break-all;
+    background: var(--paper);
+  }
+  .status.ok { border-color: var(--accent); }
+  .status.err { border-color: var(--danger); color: var(--danger); background: var(--danger-bg); }
+  .warn {
+    border: 1px solid #c99a3a;
+    background: #fbf3df;
+    padding: 14px 16px;
+    font-size: 13.5px;
+    margin-top: 16px;
+  }
+  .warn strong { color: #8a5a10; }
+  .balance {
+    font-family: var(--mono);
+    font-size: 28px;
+    margin-top: 4px;
+  }
+  code { font-family: var(--mono); background: var(--paper); padding: 1px 5px; font-size: 12.5px; }
+  footer {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 0 24px;
+    font-size: 12px;
+    color: #7a7c72;
+    font-family: var(--mono);
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="eyebrow">Outil personnel — pas un service tiers</div>
+  <h1>Vérifier &amp; sortir des fonds bloqués sur HyperEVM</h1>
+  <p class="sub">Ton Coinbase Smart Wallet, connecté directement au chain 999 (HyperEVM), en contournant l'app Coinbase qui ne liste pas ce réseau.</p>
+</header>
+
+<main>
+
+  <div class="warn">
+    <strong>Avant de faire quoi que ce soit :</strong> l'étape 1 et 2 sont en lecture seule (zéro risque, ça ne signe rien). Ne passe à l'étape 3 (envoi) qu'une fois que tu as vu ton solde réel s'afficher correctement à l'étape 2. Teste avec un petit montant en premier si possible.
+  </div>
+
+  <section>
+    <h2><span class="num">1</span>Connexion</h2>
+    <p>Connecte-toi avec le même compte (Google / passkey) que celui utilisé sur hypurrscan. Ça va ouvrir la fenêtre de signature habituelle de Coinbase.</p>
+    <button id="connectBtn">Se connecter avec Coinbase Wallet</button>
+    <div id="connectStatus" class="status" style="display:none"></div>
+  </section>
+
+  <section>
+    <h2><span class="num">2</span>Solde sur HyperEVM</h2>
+    <p>Bascule sur le réseau HyperEVM (chain ID 999) et lit ton solde. Ça n'engage rien.</p>
+    <button id="balanceBtn" disabled>Vérifier le solde</button>
+    <div id="balance" class="status" style="display:none"></div>
+
+    <label for="tokenAddr">Adresse d'un token ERC-20 à vérifier aussi (optionnel — ex: USDC/USDT sur HyperEVM)</label>
+    <input id="tokenAddr" placeholder="0x..." />
+    <div class="row">
+      <button id="tokenBalanceBtn" disabled>Vérifier ce token</button>
+    </div>
+    <div id="tokenBalance" class="status" style="display:none"></div>
+  </section>
+
+  <section>
+    <h2><span class="num">3</span>Envoyer les fonds vers un autre wallet</h2>
+    <p>Une fois le solde confirmé, entre l'adresse d'un wallet <strong>que tu contrôles</strong> (self-custody, seed phrase) pour y transférer les fonds.</p>
+
+    <label for="toAddr">Adresse de destination</label>
+    <input id="toAddr" placeholder="0x..." />
+
+    <label for="amount">Montant en HYPE natif (laisse vide pour transférer un token ERC-20 à la place)</label>
+    <input id="amount" placeholder="ex: 0.05" />
+
+    <label for="tokenSendAddr">Ou adresse du token ERC-20 à envoyer (optionnel)</label>
+    <input id="tokenSendAddr" placeholder="0x..." />
+    <label for="tokenAmount">Montant du token (unités humaines, ex: 12.5)</label>
+    <input id="tokenAmount" placeholder="ex: 12.5" />
+
+    <div class="row">
+      <button id="sendBtn" class="danger" disabled>Envoyer</button>
+    </div>
+    <div id="sendStatus" class="status" style="display:none"></div>
+  </section>
+
+  <section>
+    <h2><span class="num">3b</span>Diagnostic avant Pimlico</h2>
+    <p>Vérifie d'abord si les contrats Coinbase Smart Wallet (factory + EntryPoint) sont déployés sur HyperEVM. Lecture seule, aucun risque.</p>
+    <button id="diagBtn" disabled>Vérifier le déploiement</button>
+    <div id="diagStatus" class="status" style="display:none"></div>
+  </section>
+
+  <section>
+    <h2><span class="num">3c</span>Vérifier l'adresse recalculée (v0.6)</h2>
+    <p>Ton wallet a été créé via l'ancienne factory (v1.0, EntryPoint 0.6). Cette étape recalcule l'adresse théorique à partir des paramètres extraits de ta transaction de création sur Base, et compare au vrai <code>sender</code>. Lecture seule, aucun risque.</p>
+    <label for="ownerBytesCheck">Owner bytes (passkey x,y, extrait de initCode)</label>
+    <input id="ownerBytesCheck" value="0x1b72ae1f801aac98a074c89b468103dc6ae2453b016b00dbda9c19ba1c0df4acbc055b83903ff95d2cfe07fb9b65494f3e2e67f6e845d46e8d64b5cacfec452d" />
+    <label for="nonceCheck">Nonce utilisé à la création</label>
+    <input id="nonceCheck" value="0" />
+    <div class="row">
+      <button id="verifyAddrBtn" disabled>Vérifier l'adresse</button>
+    </div>
+    <div id="verifyAddrStatus" class="status" style="display:none"></div>
+  </section>
+
+  <section>
+    <h2><span class="num">4</span>Solution avancée — Pimlico (si l'étape 3 échoue)</h2>
+    <div class="warn">
+      <strong>Zone expérimentale.</strong> Ce flow tente de récupérer une signature générique de ta passkey via la popup Coinbase (personal_sign), puis de construire et soumettre une UserOperation nous-mêmes via Pimlico. C'est un chemin non garanti — si le format de signature renvoyé par Coinbase ne correspond pas exactement à ce qu'attend le contrat, la transaction sera simplement rejetée par le bundler (rien perdu, juste un échec visible). Ne mets pas de côté cette possibilité : ça peut demander plusieurs itérations.
+    </div>
+    <label for="pimlicoKey">Clé API Pimlico (gratuite sur pimlico.io)</label>
+    <input id="pimlicoKey" placeholder="pim_..." />
+    <label for="pimTo">Adresse de destination</label>
+    <input id="pimTo" placeholder="0x..." />
+    <label for="pimAmount">Montant en HYPE natif</label>
+    <input id="pimAmount" placeholder="ex: 0.05" />
+    <div class="row">
+      <button id="pimBtn" disabled>Tenter via Pimlico</button>
+    </div>
+    <div id="pimStatus" class="status" style="display:none"></div>
+  </section>
+
+</main>
+
+<footer>
+  Outil généré pour ton usage personnel. Ne partage jamais cette page avec quelqu'un d'autre, et ne rentre jamais de phrase de récupération ici — la connexion se fait uniquement via la fenêtre officielle Coinbase.
+</footer>
+
+<div id="sdkLoadStatus" style="max-width:640px;margin:0 auto;padding:0 24px 12px;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#7a7c72;">Chargement du SDK…</div>
+<script>
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = src;
+    s.onload = () => resolve(src);
+    s.onerror = () => reject(new Error('Échec de chargement : ' + src));
+    document.head.appendChild(s);
+  });
+}
+
+let sdkReady = false;
+const loadStatusEl = document.getElementById('sdkLoadStatus');
+
+(async () => {
+  const sources = [
+    'https://unpkg.com/@coinbase/wallet-sdk@3.9.3/dist/index.min.js',
+    'https://cdn.jsdelivr.net/npm/@coinbase/wallet-sdk@3.9.3/dist/index.min.js',
+  ];
+  for (const src of sources) {
+    try {
+      await loadScript(src);
+      if (typeof window.CoinbaseWalletSDK === 'function' || (window.CoinbaseWalletSDK && window.CoinbaseWalletSDK.CoinbaseWalletSDK)) {
+        sdkReady = true;
+        loadStatusEl.textContent = 'SDK chargé (' + src.split('/')[2] + '). Tu peux te connecter.';
+        loadStatusEl.style.color = '#1f6f5c';
+        return;
+      }
+    } catch (e) {
+      // try next source
+    }
+  }
+  loadStatusEl.textContent = 'Échec : impossible de charger le SDK Coinbase depuis ce fichier local (le navigateur bloque probablement les scripts externes sur content://). Il faut héberger ce fichier (ex: sur un service comme Netlify Drop, GitHub Pages, ou même en local avec un mini-serveur) plutôt que l\'ouvrir directement depuis les téléchargements.';
+  loadStatusEl.style.color = '#8c2f2f';
+})();
+
+let ethersReady = false;
+(async () => {
+  const sources = [
+    'https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js',
+    'https://unpkg.com/ethers@6.13.4/dist/ethers.umd.min.js',
+  ];
+  for (const src of sources) {
+    try {
+      await loadScript(src);
+      if (window.ethers) { ethersReady = true; return; }
+    } catch (e) {}
+  }
+})();
+</script>
+
+<script>
+const ENTRYPOINT_ADDR = '0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789'; // v0.6, matches this account's creation
+const FACTORY_ADDR = '0x0BA5ED0c6AA8c49038F819E587E2633c4A9F428a'; // v1.0, matches this account's creation
+const KNOWN_SENDER = userAddress; // will be set after connect, re-read at click time
+
+document.getElementById('verifyAddrBtn').addEventListener('click', async () => {
+  const el = document.getElementById('verifyAddrStatus');
+  const ownerBytes = document.getElementById('ownerBytesCheck').value.trim();
+  const nonce = document.getElementById('nonceCheck').value.trim();
+  if (!ethersReady) { setStatus(el, 'ethers.js pas encore chargé, réessaie dans quelques secondes.', 'err'); return; }
+  try {
+    await ensureHyperEVM();
+    const iface = new ethers.Interface(['function getAddress(bytes[] owners, uint256 nonce) view returns (address)']);
+    const data = iface.encodeFunctionData('getAddress', [[ownerBytes], BigInt(nonce)]);
+    const result = await provider.request({ method: 'eth_call', params: [{ to: FACTORY_ADDR, data }, 'latest'] });
+    const computed = ethers.getAddress('0x' + result.slice(-40));
+    const match = computed.toLowerCase() === userAddress.toLowerCase();
+    setStatus(el,
+      'Adresse recalculée : ' + computed + '\nTon adresse réelle : ' + userAddress + '\n\n' +
+      (match ? 'ÇA MATCHE ✓ — les paramètres sont corrects, on peut construire le déploiement.' : 'NE MATCHE PAS ✗ — les owner bytes ou le nonce ne sont pas les bons, il faut revérifier la transaction de création.'),
+      match ? 'ok' : 'err'
+    );
+  } catch (e) {
+    setStatus(el, 'Erreur : ' + (e.message || e) + '\n\nSi ça dit que la factory n\'a pas cette fonction, le nom/signature de getAddress n\'est peut-être pas exactement celui-ci sur cette version.', 'err');
+  }
+});
+
+
+document.getElementById('diagBtn').addEventListener('click', async () => {
+  const el = document.getElementById('diagStatus');
+  try {
+    await ensureHyperEVM();
+    const [factoryCode, entryPointCode] = await Promise.all([
+      provider.request({ method: 'eth_getCode', params: [FACTORY_ADDR, 'latest'] }),
+      provider.request({ method: 'eth_getCode', params: [ENTRYPOINT_ADDR, 'latest'] }),
+    ]);
+    const factoryDeployed = factoryCode && factoryCode !== '0x';
+    const epDeployed = entryPointCode && entryPointCode !== '0x';
+    setStatus(el,
+      'Factory Coinbase Smart Wallet (v1.0) : ' + (factoryDeployed ? 'DÉPLOYÉE ✓' : 'absente ✗') + '\n' +
+      'EntryPoint v0.6 : ' + (epDeployed ? 'DÉPLOYÉ ✓' : 'absent ✗') + '\n\n' +
+      (factoryDeployed && epDeployed
+        ? 'Bon signe — la brique de base existe. Le flow Pimlico ci-dessous a une vraie chance.'
+        : 'Un des deux manque. Le flow Pimlico ci-dessous n\'aboutira probablement pas sans qu\'un dev déploie d\'abord la brique manquante (n\'importe qui peut le faire via CREATE2, ça reste possible, mais c\'est une étape en plus).'),
+      factoryDeployed && epDeployed ? 'ok' : 'err'
+    );
+  } catch (e) {
+    setStatus(el, 'Erreur : ' + (e.message || e), 'err');
+  }
+});
+
+document.getElementById('pimBtn').addEventListener('click', async () => {
+  const el = document.getElementById('pimStatus');
+  const apiKey = document.getElementById('pimlicoKey').value.trim();
+  const to = document.getElementById('pimTo').value.trim();
+  const amount = document.getElementById('pimAmount').value.trim();
+
+  if (!ethersReady) { setStatus(el, 'ethers.js pas encore chargé, réessaie dans quelques secondes.', 'err'); return; }
+  if (!apiKey || !to || !amount) { setStatus(el, 'Remplis la clé Pimlico, l\'adresse et le montant.', 'err'); return; }
+  if (!confirm('Tentative expérimentale : envoi de ' + amount + ' HYPE vers ' + to + ' via Pimlico.\nAucune perte possible si ça échoue — mais vérifie l\'adresse.')) return;
+
+  const bundlerUrl = 'https://api.pimlico.io/v2/999/rpc?apikey=' + encodeURIComponent(apiKey);
+
+  async function bundlerCall(method, params) {
+    const res = await fetch(bundlerUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+    });
+    const json = await res.json();
+    if (json.error) throw new Error(method + ' → ' + json.error.message);
+    return json.result;
+  }
+
+  try {
+    setStatus(el, 'Étape 1/6 — préparation…', 'ok');
+    await ensureHyperEVM();
+
+    const smartWalletAbi = ['function execute(address target, uint256 value, bytes data)'];
+    const swInterface = new ethers.Interface(smartWalletAbi);
+    const valueWei = ethers.parseEther(amount.replace(',', '.'));
+    const callData = swInterface.encodeFunctionData('execute', [to, valueWei, '0x']);
+
+    // Check if the account is already deployed on HyperEVM; if not, find the
+    // owner bytes + create-nonce from Base (where the wallet is deployed) so
+    // we can include factory + factoryData in the UserOp to deploy it atomically.
+    setStatus(el, 'Étape 1.5/6 — vérification du déploiement du compte…', 'ok');
+    let factoryAddrField = undefined;
+    let factoryDataField = undefined;
+    let initCodeForHash = '0x';
+    const senderCode = await provider.request({ method: 'eth_getCode', params: [userAddress, 'latest'] });
+    if (!senderCode || senderCode === '0x') {
+      setStatus(el, 'Étape 1.5/6 — compte non déployé ici, récupération de ta clé owner depuis Base…', 'ok');
+      const ownerIface = new ethers.Interface(['function ownerAtIndex(uint256) view returns (bytes)']);
+      const ownerCallData = ownerIface.encodeFunctionData('ownerAtIndex', [0]);
+      const baseRes = await fetch('https://mainnet.base.org', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_call', params: [{ to: userAddress, data: ownerCallData }, 'latest'] }),
+      });
+      const baseJson = await baseRes.json();
+      if (baseJson.error || !baseJson.result || baseJson.result === '0x') {
+        throw new Error('Impossible de lire ta clé owner sur Base (le wallet n\'y est peut-être pas déployé non plus) : ' + (baseJson.error ? baseJson.error.message : 'résultat vide'));
+      }
+      const [ownerBytes] = ownerIface.decodeFunctionResult('ownerAtIndex', baseJson.result);
+
+      const factoryIface = new ethers.Interface([
+        'function getAddress(bytes[] owners, uint256 nonce) view returns (address)',
+        'function createAccount(bytes[] owners, uint256 nonce) payable returns (address)',
+      ]);
+      let matchedNonce = null;
+      for (let candidate = 0; candidate < 20; candidate++) {
+        const predictData = factoryIface.encodeFunctionData('getAddress', [[ownerBytes], candidate]);
+        const predicted = await provider.request({ method: 'eth_call', params: [{ to: FACTORY_ADDR, data: predictData }, 'latest'] });
+        const predictedAddr = ethers.getAddress('0x' + predicted.slice(-40));
+        if (predictedAddr.toLowerCase() === userAddress.toLowerCase()) { matchedNonce = candidate; break; }
+      }
+      if (matchedNonce === null) {
+        throw new Error('Aucun nonce de 0 à 19 ne reproduit ton adresse. Il en faudrait un plus grand, ou l\'owner récupéré ne correspond pas — un dev devra creuser ce point précis.');
+      }
+      factoryDataField = factoryIface.encodeFunctionData('createAccount', [[ownerBytes], matchedNonce]);
+      factoryAddrField = FACTORY_ADDR;
+      initCodeForHash = FACTORY_ADDR + factoryDataField.slice(2);
+      setStatus(el, 'Étape 1.5/6 — trouvé : nonce de création = ' + matchedNonce + '. Le déploiement sera inclus dans la transaction.', 'ok');
+    }
+
+    // nonce via EntryPoint.getNonce(sender, key=0)
+    setStatus(el, 'Étape 2/6 — lecture du nonce…', 'ok');
+    const nonceData = new ethers.Interface(['function getNonce(address,uint192) view returns (uint256)'])
+      .encodeFunctionData('getNonce', [userAddress, 0]);
+    const nonceRaw = await provider.request({ method: 'eth_call', params: [{ to: ENTRYPOINT_ADDR, data: nonceData }, 'latest'] });
+    const nonce = BigInt(nonceRaw);
+
+    // gas price via Pimlico
+    setStatus(el, 'Étape 3/6 — prix du gas (Pimlico)…', 'ok');
+    const gasPrice = await bundlerCall('pimlico_getUserOperationGasPrice', []);
+    const maxFeePerGas = BigInt(gasPrice.fast.maxFeePerGas);
+    const maxPriorityFeePerGas = BigInt(gasPrice.fast.maxPriorityFeePerGas);
+
+    // dummy signature for estimation (65-byte ECDSA-shaped placeholder wrapped as ownerIndex 0)
+    const dummySig = new ethers.AbiCoder().encode(['uint256', 'bytes'], [0, '0x' + 'ff'.repeat(65)]);
+
+    const draftOp = {
+      sender: userAddress,
+      nonce: '0x' + nonce.toString(16),
+      initCode: initCodeForHash,
+      callData,
+      callGasLimit: '0x0',
+      verificationGasLimit: '0x0',
+      preVerificationGas: '0x0',
+      maxFeePerGas: '0x' + maxFeePerGas.toString(16),
+      maxPriorityFeePerGas: '0x' + maxPriorityFeePerGas.toString(16),
+      paymasterAndData: '0x',
+      signature: dummySig,
+    };
+
+    setStatus(el, 'Étape 4/6 — estimation du gas…', 'ok');
+    const est = await bundlerCall('eth_estimateUserOperationGas', [draftOp, ENTRYPOINT_ADDR]);
+
+    setStatus(el, 'Étape 5/6 — calcul du hash + signature (passkey)…', 'ok');
+    const hashData = new ethers.Interface([
+      'function getUserOpHash((address,uint256,bytes,bytes,uint256,uint256,uint256,uint256,uint256,bytes,bytes)) view returns (bytes32)'
+    ]).encodeFunctionData('getUserOpHash', [[
+      userAddress, nonce, initCodeForHash, callData,
+      BigInt(est.callGasLimit), BigInt(est.verificationGasLimit), BigInt(est.preVerificationGas),
+      maxFeePerGas, maxPriorityFeePerGas, '0x', '0x',
+    ]]);
+    const userOpHash = await provider.request({ method: 'eth_call', params: [{ to: ENTRYPOINT_ADDR, data: hashData }, 'latest'] });
+
+    const rawSig = await provider.request({ method: 'personal_sign', params: [userOpHash, userAddress] });
+    const wrappedSig = new ethers.AbiCoder().encode(['uint256', 'bytes'], [0, rawSig]);
+
+    setStatus(el, 'Étape 6/6 — envoi au bundler Pimlico…', 'ok');
+    const finalOp = {
+      sender: userAddress,
+      nonce: '0x' + nonce.toString(16),
+      initCode: initCodeForHash,
+      callData,
+      callGasLimit: '0x' + BigInt(est.callGasLimit).toString(16),
+      verificationGasLimit: '0x' + BigInt(est.verificationGasLimit).toString(16),
+      preVerificationGas: '0x' + BigInt(est.preVerificationGas).toString(16),
+      maxFeePerGas: '0x' + maxFeePerGas.toString(16),
+      maxPriorityFeePerGas: '0x' + maxPriorityFeePerGas.toString(16),
+      paymasterAndData: '0x',
+      signature: wrappedSig,
+    };
+
+    const sentHash = await bundlerCall('eth_sendUserOperation', [finalOp, ENTRYPOINT_ADDR]);
+    setStatus(el, 'UserOperation envoyée : ' + sentHash + '\nSuis son statut via pimlico_getUserOperationStatus, ou regarde https://hyperevmscan.io après quelques secondes.', 'ok');
+  } catch (e) {
+    setStatus(el, 'Échec (attendu, possible dès le premier essai) : ' + (e.message || e) + '\n\nSi l\'erreur mentionne la signature/validation, c\'est que le format WebAuthn renvoyé par Coinbase ne correspond pas exactement à ce qu\'attend le contrat — c\'est le point précis qu\'un dev doit ajuster.', 'err');
+  }
+});
+</script>
+<script>
+const HYPEREVM_CHAIN_ID = 999;
+const HYPEREVM_CHAIN_ID_HEX = '0x' + HYPEREVM_CHAIN_ID.toString(16);
+const HYPEREVM_RPC = 'https://rpc.hyperliquid.xyz/evm';
+
+let provider = null;
+let userAddress = null;
+
+function setStatus(el, text, kind) {
+  el.style.display = 'block';
+  el.textContent = text;
+  el.className = 'status' + (kind ? ' ' + kind : '');
+}
+
+async function ensureHyperEVM() {
+  try {
+    await provider.request({
+      method: 'wallet_switchEthereumChain',
+      params: [{ chainId: HYPEREVM_CHAIN_ID_HEX }],
+    });
+  } catch (switchError) {
+    if (switchError.code === 4902 || /Unrecognized chain/i.test(switchError.message || '')) {
+      await provider.request({
+        method: 'wallet_addEthereumChain',
+        params: [{
+          chainId: HYPEREVM_CHAIN_ID_HEX,
+          chainName: 'HyperEVM',
+          nativeCurrency: { name: 'HYPE', symbol: 'HYPE', decimals: 18 },
+          rpcUrls: [HYPEREVM_RPC],
+          blockExplorerUrls: ['https://hyperevmscan.io'],
+        }],
+      });
+    } else {
+      throw switchError;
+    }
+  }
+}
+
+document.getElementById('connectBtn').addEventListener('click', async () => {
+  const statusEl = document.getElementById('connectStatus');
+  if (!sdkReady) {
+    setStatus(statusEl, 'Le SDK n\'est pas chargé (voir message en haut de page). Impossible de continuer depuis ce fichier local — il faut l\'héberger quelque part (voir mon message).', 'err');
+    return;
+  }
+  try {
+    const SDKCtor = (typeof window.CoinbaseWalletSDK === 'function')
+      ? window.CoinbaseWalletSDK
+      : (window.CoinbaseWalletSDK && window.CoinbaseWalletSDK.CoinbaseWalletSDK);
+    if (typeof SDKCtor !== 'function') {
+      throw new Error('SDK non chargé correctement — recharge la page (vérifie ta connexion internet).');
+    }
+    const sdk = new SDKCtor({ appName: 'Récupération HyperEVM' });
+    provider = sdk.makeWeb3Provider();
+    const accounts = await provider.request({ method: 'eth_requestAccounts' });
+    userAddress = accounts[0];
+    setStatus(statusEl, 'Connecté : ' + userAddress, 'ok');
+    document.getElementById('balanceBtn').disabled = false;
+    document.getElementById('tokenBalanceBtn').disabled = false;
+    document.getElementById('sendBtn').disabled = false;
+    document.getElementById('diagBtn').disabled = false;
+    document.getElementById('pimBtn').disabled = false;
+    document.getElementById('verifyAddrBtn').disabled = false;
+  } catch (e) {
+    setStatus(statusEl, 'Erreur de connexion : ' + (e.message || e), 'err');
+  }
+});
+
+document.getElementById('balanceBtn').addEventListener('click', async () => {
+  const el = document.getElementById('balance');
+  try {
+    await ensureHyperEVM();
+    const balHex = await provider.request({
+      method: 'eth_getBalance',
+      params: [userAddress, 'latest'],
+    });
+    const balWei = BigInt(balHex);
+    const balHype = Number(balWei) / 1e18;
+    setStatus(el, 'Solde HYPE natif sur HyperEVM : ' + balHype + ' HYPE\n(adresse : ' + userAddress + ')', 'ok');
+  } catch (e) {
+    setStatus(el, 'Erreur : ' + (e.message || e) + '\n\nSi ça échoue ici, c\'est un signe que Coinbase bloque même la lecture sur ce réseau — regarde la section "Si l\'étape 3 échoue" plus bas.', 'err');
+  }
+});
+
+document.getElementById('tokenBalanceBtn').addEventListener('click', async () => {
+  const el = document.getElementById('tokenBalance');
+  const tokenAddr = document.getElementById('tokenAddr').value.trim();
+  if (!tokenAddr) { setStatus(el, 'Entre une adresse de contrat token.', 'err'); return; }
+  try {
+    await ensureHyperEVM();
+    // balanceOf(address) selector: 0x70a08231
+    const paddedAddr = userAddress.slice(2).padStart(64, '0');
+    const data = '0x70a08231' + paddedAddr;
+    const result = await provider.request({
+      method: 'eth_call',
+      params: [{ to: tokenAddr, data }, 'latest'],
+    });
+    const raw = BigInt(result);
+    setStatus(el, 'Solde brut du token (unités les plus petites) : ' + raw.toString() + '\n(divise par 10^decimals du token pour la valeur humaine)', 'ok');
+  } catch (e) {
+    setStatus(el, 'Erreur : ' + (e.message || e), 'err');
+  }
+});
+
+document.getElementById('sendBtn').addEventListener('click', async () => {
+  const el = document.getElementById('sendStatus');
+  const to = document.getElementById('toAddr').value.trim();
+  const amount = document.getElementById('amount').value.trim();
+  const tokenAddr = document.getElementById('tokenSendAddr').value.trim();
+  const tokenAmount = document.getElementById('tokenAmount').value.trim();
+
+  if (!to) { setStatus(el, 'Entre une adresse de destination.', 'err'); return; }
+  if (!confirm('Confirme : tu envoies vers ' + to + (amount ? (' — ' + amount + ' HYPE natif') : (' — token ' + tokenAddr + ' montant ' + tokenAmount)) + '.\n\nVérifie bien cette adresse, c\'est irréversible.')) return;
+
+  try {
+    await ensureHyperEVM();
+
+    if (amount) {
+      const valueWei = BigInt(Math.round(parseFloat(amount.replace(',', '.')) * 1e18));
+      const txHash = await provider.request({
+        method: 'eth_sendTransaction',
+        params: [{
+          from: userAddress,
+          to: to,
+          value: '0x' + valueWei.toString(16),
+        }],
+      });
+      setStatus(el, 'Transaction envoyée : ' + txHash + '\nVérifie sur https://hyperevmscan.io/tx/' + txHash, 'ok');
+    } else if (tokenAddr && tokenAmount) {
+      // transfer(address,uint256) selector: 0xa9059cbb — assumes 18 decimals, adjust if needed
+      const paddedTo = to.slice(2).padStart(64, '0');
+      const amountWei = BigInt(Math.round(parseFloat(tokenAmount.replace(',', '.')) * 1e18));
+      const paddedAmount = amountWei.toString(16).padStart(64, '0');
+      const data = '0xa9059cbb' + paddedTo + paddedAmount;
+      const txHash = await provider.request({
+        method: 'eth_sendTransaction',
+        params: [{
+          from: userAddress,
+          to: tokenAddr,
+          data: data,
+        }],
+      });
+      setStatus(el, 'Transaction envoyée : ' + txHash + '\nVérifie sur https://hyperevmscan.io/tx/' + txHash, 'ok');
+    } else {
+      setStatus(el, 'Remplis soit le montant HYPE natif, soit l\'adresse token + montant token.', 'err');
+    }
+  } catch (e) {
+    setStatus(el, 'Échec : ' + (e.message || e) + '\n\nC\'est le signal attendu si Coinbase ne relaie pas sur ce réseau. Passe à la solution "bundler tiers" (section ci-dessous) avec un dev.', 'err');
+  }
+});
+</script>
+
+</body>
+</html>
