@@ -257,6 +257,13 @@
       <button id="directSendBtn" disabled>Préparer et envoyer</button>
     </div>
     <div id="directSendStatus" class="status" style="display:none"></div>
+
+    <label for="simulateData">Debug — simuler une transaction handleOps échouée (colle les "Données hexadécimales")</label>
+    <input id="simulateData" placeholder="0x1fad948c..." />
+    <div class="row">
+      <button id="simulateBtn" disabled>Simuler (voir la raison de l'échec)</button>
+    </div>
+    <div id="simulateStatus" class="status" style="display:none"></div>
   </section>
 
   <section>
@@ -581,6 +588,48 @@ document.getElementById('directSendBtn').addEventListener('click', async () => {
   }
 });
 
+document.getElementById('simulateBtn').addEventListener('click', async () => {
+  const el = document.getElementById('simulateStatus');
+  const data = document.getElementById('simulateData').value.trim();
+  if (!data) { setStatus(el, 'Colle les données hexadécimales de la transaction à simuler.', 'err'); return; }
+  try {
+    await ensureHyperEVM();
+    setStatus(el, 'Simulation en cours (eth_call, aucun risque)…', 'ok');
+    try {
+      const result = await provider.request({ method: 'eth_call', params: [{ from: '0xcF5e8d18B0ea6b2854C4A2B81f069761b7b12e8C', to: ENTRYPOINT_ADDR, data }, 'latest'] });
+      setStatus(el, 'Résultat (pas de revert détecté via eth_call) : ' + result, 'ok');
+    } catch (callErr) {
+      // Le message d'erreur ou callErr.data contient généralement les données de revert brutes.
+      let raw = callErr && (callErr.data || (callErr.error && callErr.error.data) || callErr.message || String(callErr));
+      let report = 'Erreur brute renvoyée par le nœud :\n' + JSON.stringify(raw) + '\n\n';
+      // Tente de décoder si ça ressemble à un FailedOp(uint256,string) ou Error(string)
+      let hex = typeof raw === 'string' ? raw : (raw && raw.data) || '';
+      const m = hex.match(/0x[0-9a-fA-F]+/);
+      if (m) hex = m[0];
+      if (hex && hex.startsWith('0x') && hex.length > 10) {
+        try {
+          const selector = hex.slice(0, 10);
+          if (selector === '0x08c379a0') { // Error(string)
+            const decoded = new ethers.AbiCoder().decode(['string'], '0x' + hex.slice(10));
+            report += 'Décodé comme Error(string) : "' + decoded[0] + '"';
+          } else {
+            // essaie FailedOp(uint256,string)
+            const decoded = new ethers.AbiCoder().decode(['uint256', 'string'], '0x' + hex.slice(10));
+            report += 'Décodé comme FailedOp(opIndex=' + decoded[0] + ', reason="' + decoded[1] + '")';
+          }
+        } catch (decodeErr) {
+          report += 'Impossible de décoder automatiquement (' + (decodeErr.message || decodeErr) + '). Regarde le hex brut ci-dessus.';
+        }
+      } else {
+        report += 'Pas de données de revert exploitables trouvées dans l\'erreur.';
+      }
+      setStatus(el, report, 'err');
+    }
+  } catch (e) {
+    setStatus(el, 'Erreur : ' + (e.message || e), 'err');
+  }
+});
+
 document.getElementById('pimBtn').addEventListener('click', async () => {
   const el = document.getElementById('pimStatus');
   const apiKey = document.getElementById('pimlicoKey').value.trim();
@@ -791,6 +840,7 @@ document.getElementById('connectBtn').addEventListener('click', async () => {
     document.getElementById('verifyAddrBtn').disabled = false;
     document.getElementById('debugSignBtn').disabled = false;
     document.getElementById('directSendBtn').disabled = false;
+    document.getElementById('simulateBtn').disabled = false;
   } catch (e) {
     setStatus(statusEl, 'Erreur de connexion : ' + (e.message || e), 'err');
   }
