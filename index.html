@@ -247,6 +247,19 @@
   </section>
 
   <section>
+    <h2><span class="num">3f</span>Transfert direct via EntryPoint (wallet déjà déployé)</h2>
+    <p>Construit une UserOperation pour <code>execute(to, value, "0x")</code>, demande la signature à ta passkey, puis soumet directement à l'EntryPoint (sans Pimlico ni aucun tiers). Fonctionne uniquement maintenant que le wallet est déployé sur HyperEVM.</p>
+    <label for="directTo">Adresse de destination</label>
+    <input id="directTo" placeholder="0x..." />
+    <label for="directAmount">Montant en HYPE natif</label>
+    <input id="directAmount" placeholder="ex: 0.1" />
+    <div class="row">
+      <button id="directSendBtn" disabled>Préparer et envoyer</button>
+    </div>
+    <div id="directSendStatus" class="status" style="display:none"></div>
+  </section>
+
+  <section>
     <h2><span class="num">4</span>Solution avancée — Pimlico (si l'étape 3 échoue)</h2>
     <div class="warn">
       <strong>Zone expérimentale.</strong> Ce flow tente de récupérer une signature générique de ta passkey via la popup Coinbase (personal_sign), puis de construire et soumettre une UserOperation nous-mêmes via Pimlico. C'est un chemin non garanti — si le format de signature renvoyé par Coinbase ne correspond pas exactement à ce qu'attend le contrat, la transaction sera simplement rejetée par le bundler (rien perdu, juste un échec visible). Ne mets pas de côté cette possibilité : ça peut demander plusieurs itérations.
@@ -352,15 +365,18 @@ document.getElementById('diagBtn').addEventListener('click', async () => {
   const el = document.getElementById('diagStatus');
   try {
     await ensureHyperEVM();
-    const [factoryCode, entryPointCode] = await Promise.all([
+    const [factoryCode, entryPointCode, multicallCode] = await Promise.all([
       provider.request({ method: 'eth_getCode', params: [FACTORY_ADDR, 'latest'] }),
       provider.request({ method: 'eth_getCode', params: [ENTRYPOINT_ADDR, 'latest'] }),
+      provider.request({ method: 'eth_getCode', params: ['0xcA11bde05977b3631167028862be2a173976CA11', 'latest'] }),
     ]);
     const factoryDeployed = factoryCode && factoryCode !== '0x';
     const epDeployed = entryPointCode && entryPointCode !== '0x';
+    const multicallDeployed = multicallCode && multicallCode !== '0x';
     setStatus(el,
       'Factory Coinbase Smart Wallet (v1.0) : ' + (factoryDeployed ? 'DÉPLOYÉE ✓' : 'absente ✗') + '\n' +
-      'EntryPoint v0.6 : ' + (epDeployed ? 'DÉPLOYÉ ✓' : 'absent ✗') + '\n\n' +
+      'EntryPoint v0.6 : ' + (epDeployed ? 'DÉPLOYÉ ✓' : 'absent ✗') + '\n' +
+      'Multicall3 (0xcA11...CA11) : ' + (multicallDeployed ? 'DÉPLOYÉ ✓' : 'absent ✗') + '\n\n' +
       (factoryDeployed && epDeployed
         ? 'Bon signe — la brique de base existe. Le flow Pimlico ci-dessous a une vraie chance.'
         : 'Un des deux manque. Le flow Pimlico ci-dessous n\'aboutira probablement pas sans qu\'un dev déploie d\'abord la brique manquante (n\'importe qui peut le faire via CREATE2, ça reste possible, mais c\'est une étape en plus).'),
@@ -464,6 +480,104 @@ document.getElementById('checkOwnersBtn').addEventListener('click', async () => 
     setStatus(el, report, allMatch ? 'ok' : 'err');
   } catch (e) {
     setStatus(el, 'Erreur : ' + (e.message || e), 'err');
+  }
+});
+
+document.getElementById('directSendBtn').addEventListener('click', async () => {
+  const el = document.getElementById('directSendStatus');
+  const to = document.getElementById('directTo').value.trim();
+  const amount = document.getElementById('directAmount').value.trim();
+  if (!ethersReady) { setStatus(el, 'ethers.js pas encore chargé, réessaie dans quelques secondes.', 'err'); return; }
+  if (!to || !amount) { setStatus(el, 'Remplis l\'adresse et le montant.', 'err'); return; }
+  if (!confirm('Confirme : envoi direct de ' + amount + ' HYPE vers ' + to + ' via EntryPoint (sans tiers).\nVérifie bien cette adresse.')) return;
+
+  try {
+    setStatus(el, 'Étape 1/6 — préparation…', 'ok');
+    await ensureHyperEVM();
+
+    const smartWalletAbi = ['function execute(address target, uint256 value, bytes data)'];
+    const swInterface = new ethers.Interface(smartWalletAbi);
+    const valueWei = ethers.parseEther(amount.replace(',', '.'));
+    const callData = swInterface.encodeFunctionData('execute', [to, valueWei, '0x']);
+
+    setStatus(el, 'Étape 2/6 — lecture du nonce…', 'ok');
+    const nonceData = new ethers.Interface(['function getNonce(address,uint192) view returns (uint256)'])
+      .encodeFunctionData('getNonce', [userAddress, 0]);
+    const nonceRaw = await provider.request({ method: 'eth_call', params: [{ to: ENTRYPOINT_ADDR, data: nonceData }, 'latest'] });
+    const nonce = BigInt(nonceRaw);
+
+    setStatus(el, 'Étape 3/6 — prix du gas (RPC HyperEVM)…', 'ok');
+    const gasPriceHex = await provider.request({ method: 'eth_gasPrice', params: [] });
+    const baseGasPrice = BigInt(gasPriceHex);
+    const maxFeePerGas = baseGasPrice * 3n; // marge confortable
+    const maxPriorityFeePerGas = baseGasPrice;
+
+    // Limites de gas généreuses et fixes (pas d'estimation tierce nécessaire ici,
+    // le compte est déjà déployé donc l'exécution est simple : un seul execute()).
+    const callGasLimit = 300000n;
+    const verificationGasLimit = 600000n;
+    const preVerificationGas = 100000n;
+
+    setStatus(el, 'Étape 4/6 — calcul du hash de la UserOperation…', 'ok');
+    const hashData = new ethers.Interface([
+      'function getUserOpHash((address,uint256,bytes,bytes,uint256,uint256,uint256,uint256,uint256,bytes,bytes)) view returns (bytes32)'
+    ]).encodeFunctionData('getUserOpHash', [[
+      userAddress, nonce, '0x', callData,
+      callGasLimit, verificationGasLimit, preVerificationGas,
+      maxFeePerGas, maxPriorityFeePerGas, '0x', '0x',
+    ]]);
+    const userOpHash = await provider.request({ method: 'eth_call', params: [{ to: ENTRYPOINT_ADDR, data: hashData }, 'latest'] });
+
+    setStatus(el, 'Étape 5/6 — signature (approuve via ta passkey dans la popup)…', 'ok');
+    const rawSig = await provider.request({ method: 'personal_sign', params: [userOpHash, userAddress] });
+
+    // Inspecte le format renvoyé : s'il s'agit encore d'un blob ERC-6492 (compte "non déployé"
+    // selon Coinbase), on log un avertissement mais on tente quand même de l'utiliser tel quel
+    // si sa dernière partie ("signature" du wrapper) redécode en SignatureWrapper standard.
+    let finalSig = rawSig;
+    const magic = '6492649264926492649264926492649264926492649264926492649264926492';
+    if (rawSig.toLowerCase().endsWith(magic)) {
+      setStatus(el, 'Étape 5/6 — la réponse est encore un blob ERC-6492 malgré le déploiement ; extraction de la signature interne…', 'ok');
+      const abiCoder = new ethers.AbiCoder();
+      const body = rawSig.slice(0, rawSig.length - magic.length);
+      const decoded = abiCoder.decode(['address', 'bytes', 'bytes'], body);
+      finalSig = decoded[2];
+    } else {
+      // format brut retourné directement (pas de wrapper 6492) : on l'enveloppe en SignatureWrapper(0, sig)
+      finalSig = new ethers.AbiCoder().encode(['uint256', 'bytes'], [0, rawSig]);
+    }
+
+    setStatus(el, 'Étape 6/6 — envoi direct à EntryPoint.handleOps…', 'ok');
+    const finalOp = {
+      sender: userAddress,
+      nonce: '0x' + nonce.toString(16),
+      initCode: '0x',
+      callData,
+      callGasLimit: '0x' + callGasLimit.toString(16),
+      verificationGasLimit: '0x' + verificationGasLimit.toString(16),
+      preVerificationGas: '0x' + preVerificationGas.toString(16),
+      maxFeePerGas: '0x' + maxFeePerGas.toString(16),
+      maxPriorityFeePerGas: '0x' + maxPriorityFeePerGas.toString(16),
+      paymasterAndData: '0x',
+      signature: finalSig,
+    };
+    const handleOpsData = new ethers.Interface([
+      'function handleOps((address,uint256,bytes,bytes,uint256,uint256,uint256,uint256,uint256,bytes,bytes)[] ops, address beneficiary)'
+    ]).encodeFunctionData('handleOps', [[[
+      finalOp.sender, finalOp.nonce, finalOp.initCode, finalOp.callData,
+      finalOp.callGasLimit, finalOp.verificationGasLimit, finalOp.preVerificationGas,
+      finalOp.maxFeePerGas, finalOp.maxPriorityFeePerGas, finalOp.paymasterAndData, finalOp.signature,
+    ]], userAddress]);
+
+    setStatus(el,
+      'Prêt. Voici la transaction à envoyer TOI-MÊME depuis ton wallet EOA (celui qui a payé le gas du déploiement) :\n\n' +
+      'À (to) : ' + ENTRYPOINT_ADDR + '\n' +
+      'Valeur : 0\n' +
+      'Données (data) :\n' + handleOpsData,
+      'ok'
+    );
+  } catch (e) {
+    setStatus(el, 'Échec : ' + (e.message || e), 'err');
   }
 });
 
@@ -676,6 +790,7 @@ document.getElementById('connectBtn').addEventListener('click', async () => {
     document.getElementById('pimBtn').disabled = false;
     document.getElementById('verifyAddrBtn').disabled = false;
     document.getElementById('debugSignBtn').disabled = false;
+    document.getElementById('directSendBtn').disabled = false;
   } catch (e) {
     setStatus(statusEl, 'Erreur de connexion : ' + (e.message || e), 'err');
   }
