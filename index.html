@@ -238,6 +238,15 @@
   </section>
 
   <section>
+    <h2><span class="num">3e</span>Vérifier les propriétaires connus sur Base</h2>
+    <p>Lecture seule sur Base (là où ton wallet est réellement déployé), aucune connexion wallet nécessaire. On liste tous les "owners" actuels et on regarde si trois adresses précises en font déjà partie.</p>
+    <div class="row">
+      <button id="checkOwnersBtn">Vérifier les propriétaires sur Base</button>
+    </div>
+    <div id="checkOwnersStatus" class="status" style="display:none"></div>
+  </section>
+
+  <section>
     <h2><span class="num">4</span>Solution avancée — Pimlico (si l'étape 3 échoue)</h2>
     <div class="warn">
       <strong>Zone expérimentale.</strong> Ce flow tente de récupérer une signature générique de ta passkey via la popup Coinbase (personal_sign), puis de construire et soumettre une UserOperation nous-mêmes via Pimlico. C'est un chemin non garanti — si le format de signature renvoyé par Coinbase ne correspond pas exactement à ce qu'attend le contrat, la transaction sera simplement rejetée par le bundler (rien perdu, juste un échec visible). Ne mets pas de côté cette possibilité : ça peut demander plusieurs itérations.
@@ -394,6 +403,65 @@ document.getElementById('debugSignBtn').addEventListener('click', async () => {
       }
     }
     setStatus(el, report, 'ok');
+  } catch (e) {
+    setStatus(el, 'Erreur : ' + (e.message || e), 'err');
+  }
+});
+
+document.getElementById('checkOwnersBtn').addEventListener('click', async () => {
+  const el = document.getElementById('checkOwnersStatus');
+  setStatus(el, 'Lecture des propriétaires sur Base…', 'ok');
+  const WALLET = '0xd3408d95d10E04E0dEdCED940370F5235886EB1F';
+  const CANDIDATES = [
+    '0x8d9247400acfa0584d7d763b9ce35096a4a8f00b',
+    '0xc5dbace9a3e7be4f2ad0f1c47859608f6d6a1e8a',
+    '0xdccca3030f95521928c95c72b2097aab58486b20',
+  ];
+  async function baseCall(data) {
+    const res = await fetch('https://mainnet.base.org', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_call', params: [{ to: WALLET, data }, 'latest'] }),
+    });
+    const json = await res.json();
+    if (json.error) throw new Error(json.error.message);
+    return json.result;
+  }
+  try {
+    // nextOwnerIndex() selector 0xd948fd2e
+    const nextIdxHex = await baseCall('0xd948fd2e');
+    const nextIdx = parseInt(nextIdxHex, 16);
+    let report = 'nextOwnerIndex() = ' + nextIdx + '\n\n';
+    const owners = [];
+    for (let i = 0; i < nextIdx; i++) {
+      // ownerAtIndex(uint256) selector 0x8ea69029
+      const idxHex = i.toString(16).padStart(64, '0');
+      const result = await baseCall('0x8ea69029' + idxHex);
+      // result is abi-encoded bytes: offset(32) + length(32) + data
+      const lenHex = result.slice(2 + 64, 2 + 128);
+      const len = parseInt(lenHex, 16);
+      const dataHex = result.slice(2 + 128, 2 + 128 + len * 2);
+      let ownerDesc;
+      if (len === 32) {
+        ownerDesc = '0x' + dataHex.slice(-40) + ' (adresse EOA)';
+      } else if (len === 64) {
+        ownerDesc = '0x' + dataHex + ' (clé publique passkey x,y)';
+      } else {
+        ownerDesc = dataHex + ' (format inattendu, ' + len + ' octets)';
+      }
+      owners.push({ index: i, len, dataHex });
+      report += 'owner[' + i + '] : ' + ownerDesc + '\n';
+    }
+    report += '\n--- Vérification des 3 adresses candidates ---\n';
+    for (const cand of CANDIDATES) {
+      const match = owners.find(o => o.len === 32 && o.dataHex.slice(-40).toLowerCase() === cand.slice(2).toLowerCase());
+      report += cand + ' : ' + (match ? ('DÉJÀ PROPRIÉTAIRE ✓ (index ' + match.index + ')') : 'PAS TROUVÉ ✗ — inconnu sur Base') + '\n';
+    }
+    const allMatch = CANDIDATES.every(cand => owners.some(o => o.len === 32 && o.dataHex.slice(-40).toLowerCase() === cand.slice(2).toLowerCase()));
+    report += '\n' + (allMatch
+      ? 'RASSURANT : les 3 adresses sont déjà des propriétaires connus et actifs sur Base. Le paquet signé par Coinbase ne fait que synchroniser cette même liste sur une nouvelle chaîne — pas d\'ajout suspect.'
+      : 'ATTENTION : au moins une adresse candidate n\'est PAS un propriétaire existant sur Base. Ne pas exécuter le paquet signé sans comprendre pourquoi.');
+    setStatus(el, report, allMatch ? 'ok' : 'err');
   } catch (e) {
     setStatus(el, 'Erreur : ' + (e.message || e), 'err');
   }
